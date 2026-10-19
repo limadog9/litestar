@@ -34,6 +34,7 @@ from litestar._kwargs.parameter_definition import (
 from litestar.connection import ASGIConnection, WebSocket
 from litestar.constants import RESERVED_KWARGS
 from litestar.datastructures.headers import Headers
+from litestar.di import Dependency
 from litestar.enums import ParamType, RequestEncodingType
 from litestar.exceptions import ImproperlyConfiguredException
 from litestar.exceptions.base_exceptions import LitestarDeprecationWarning
@@ -355,10 +356,12 @@ class KwargsModel:
         sequence_query_parameter_names = {p.field_alias for p in expected_query_parameters if p.is_sequence}
 
         for param in param_definitions:
-            # legacy quirk: when using implicit style, dependencies with no providers
+            # legacy quirk: when using the deprecated Dependency() marker, dependencies with no providers
             # but a default value are actually treated as query parameters by the
             # injection mechanism, so we add them back as such
-            if param.param_type == ParamType.DEPENDENCY:
+            if param.param_type == ParamType.DEPENDENCY and not field_definitions[param.field_name].has_metadata(
+                Dependency
+            ):
                 expected_query_parameters.add(param)
 
             if legacy_style := param.legacy_style:

@@ -7,7 +7,7 @@ import pytest
 from typing_extensions import Annotated
 
 from litestar import Litestar, get
-from litestar.di import NamedDependency
+from litestar.di import NamedDependency, Provide
 from litestar.enums import ParamType
 from litestar.exceptions.base_exceptions import LitestarDeprecationWarning
 from litestar.openapi.spec import Parameter as OpenAPIParameter
@@ -351,22 +351,45 @@ def test_deprecated_dependency_marker() -> None:
     with pytest.warns(LitestarDeprecationWarning, match="Call to deprecated function 'Dependency'"):
 
         @get("/")
-        async def handler(foo: Annotated[int, Dependency()] = 1) -> None:
-            pass
+        async def handler(foo: Annotated[int, Dependency()] = 1) -> int:
+            return foo
 
-        Litestar([handler])
+        with create_test_client([handler]) as client:
+            assert client.get("/").json() == 1
+            assert client.get("/?foo=5").json() == 5
 
 
-def test_named_dependency_explicit_marker() -> None:
+@pytest.mark.parametrize("query", ["", "?foo=5", "?foo=abc"])
+@pytest.mark.parametrize("with_provider", [False, True])
+def test_named_dependency_explicit_marker(query: str, with_provider: bool) -> None:
+    async def provide_foo() -> int:
+        return 42
 
     @get("/")
     async def handler(foo: NamedDependency[int] = 1) -> int:
         return foo
 
-    with create_test_client([handler]) as client:
-        # uses parameter default
-        assert client.get("/").json() == 1
+    dependencies = {"foo": Provide(provide_foo)} if with_provider else {}
+    with create_test_client([handler], dependencies=dependencies) as client:
+        response = client.get(f"/{query}")
+        assert response.status_code == 200
+        assert response.json() == (42 if with_provider else 1)
 
         # isn't implicitly treated as a query parameter
         schema = client.get("/schema/openapi.json").json()
         assert schema["paths"]["/"]["get"].get("parameters") is None
+
+
+@pytest.mark.parametrize("query", ["", "?foo=5", "?foo=abc"])
+def test_named_dependency_default_in_provider(query: str) -> None:
+    async def provide_bar(foo: NamedDependency[int] = 1) -> int:
+        return foo
+
+    @get("/", dependencies={"bar": Provide(provide_bar)})
+    async def handler(bar: NamedDependency[int]) -> int:
+        return bar
+
+    with create_test_client([handler]) as client:
+        response = client.get(f"/{query}")
+        assert response.status_code == 200
+        assert response.json() == 1
